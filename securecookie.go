@@ -42,15 +42,16 @@ var (
 	errNoCodecs            = Error{msg: "no codecs provided"}
 	errHashKeyNotSet       = Error{msg: "hash key is not set"}
 	errBlockKeyNotSet      = Error{msg: "block key is not set"}
-	errEncodedValueTooLong = Error{msg: "the value is too long"}
+	errEncodedValueTooLong = Error{msg: "cookie the value is too long"}
 
-	errValueToDecodeTooLong = Error{msg: "the value is too long"}
-	errNameIsUnexpected     = Error{msg: "name is unexpected"}
-	errTimestampTooNew      = Error{msg: "timestamp is too new"}
-	errTimestampExpired     = Error{msg: "expired timestamp"}
-	errDecryptionFailed     = Error{msg: "the value could not be decrypted"}
-	errValueNotByte         = Error{msg: "value not a []byte."}
-	errValueNotBytePtr      = Error{msg: "value not a pointer to []byte."}
+	errValueToDecodeTooSmall = Error{msg: "the value is too small"}
+	errValueToDecodeTooLong  = Error{msg: "the value is too long"}
+	errNameIsUnexpected      = Error{msg: "cookie name is unexpected"}
+	errTimestampTooNew       = Error{msg: "cookie timestamp is too new"}
+	errTimestampExpired      = Error{msg: "cookie timestamp is too old"}
+	errDecryptionFailed      = Error{msg: "the value could not be decrypted"}
+	errValueNotByte          = Error{msg: "value not a []byte."}
+	errValueNotBytePtr       = Error{msg: "value not a pointer to []byte."}
 
 	// ErrMacInvalid indicates that cookie decoding failed because the HMAC
 	// could not be extracted and verified.  Direct use of this error
@@ -83,11 +84,12 @@ type Codec interface {
 func New(hashKey, blockKey []byte) *SecureCookie {
 	cookie := &SecureCookie{
 		hashKey:   hashKey,
-		blockKey:  blockKey,
 		hashFunc:  sha256.New,
-		maxAge:    86400 * 30,
+		blockKey:  blockKey,
 		maxLength: 4096,
+		maxAge:    86400 * 30,
 		sz:        JSONEncoder{},
+		hmacSize:  sha256.Size,
 	}
 	if len(hashKey) == 0 {
 		panic(errHashKeyNotSet)
@@ -110,6 +112,7 @@ type SecureCookie struct {
 	minAge    int64
 	err       error
 	sz        Serializer
+	hmacSize  int
 	// For testing purposes, the function that returns the current timestamp.
 	// If not set, it will use time.Now().UTC().Unix().
 	timeFunc func() int64
@@ -207,9 +210,9 @@ func (s *SecureCookie) Encode(name string, value interface{}) (string, error) {
 	if err = binary.Write(buf, binary.LittleEndian, uint16(len(name))); err != nil {
 		return "", err
 	}
-	ts := s.timestamp()
+	now := s.timestamp()
 	buf.WriteString(name)
-	if err = binary.Write(buf, binary.LittleEndian, uint64(ts)); err != nil {
+	if err = binary.Write(buf, binary.LittleEndian, uint64(now)); err != nil {
 		return "", err
 	}
 	buf.Write(data)
@@ -254,8 +257,11 @@ func (s *SecureCookie) Decode(name, value string, dst interface{}) error {
 	if err != nil {
 		return err
 	}
+	if len(b) <= s.hmacSize {
+		return errValueToDecodeTooSmall
+	}
+	mac, payload := b[:s.hmacSize], b[s.hmacSize:]
 	h := hmac.New(s.hashFunc, s.hashKey)
-	mac, payload := b[:32], b[32:]
 	if err = verifyMac(h, payload, mac); err != nil {
 		return err
 	}
@@ -267,11 +273,11 @@ func (s *SecureCookie) Decode(name, value string, dst interface{}) error {
 		return fmt.Errorf("%w: %s", errNameIsUnexpected, name)
 	}
 	// 4. Verify date ranges.
-	t2 := s.timestamp()
-	if s.minAge != 0 && ts > t2-s.minAge {
+	now := s.timestamp()
+	if s.minAge != 0 && s.minAge > now-ts {
 		return errTimestampTooNew
 	}
-	if s.maxAge != 0 && ts < t2-s.maxAge {
+	if s.maxAge != 0 && s.maxAge < now-ts {
 		return errTimestampExpired
 	}
 	// 5. Decrypt (optional).
