@@ -222,7 +222,7 @@ func (s *SecureCookie) Encode(name string, value interface{}) (string, error) {
 	out = encode(out)
 	// 5. Check length.
 	if s.maxLength != 0 && len(out) > s.maxLength {
-		return "", fmt.Errorf("%s: %d", errEncodedValueTooLong, len(out))
+		return "", fmt.Errorf("%w: %d", errEncodedValueTooLong, len(out))
 	}
 	// Done.
 	return string(out), nil
@@ -247,7 +247,7 @@ func (s *SecureCookie) Decode(name, value string, dst interface{}) error {
 	name = s.sanitizeName(name)
 	// 1. Check length.
 	if s.maxLength != 0 && len(value) > s.maxLength {
-		return fmt.Errorf("%s: %d", errValueToDecodeTooLong, len(value))
+		return fmt.Errorf("%w: %d", errValueToDecodeTooLong, len(value))
 	}
 	// 2. Decode from base64.
 	b, err := decode([]byte(value))

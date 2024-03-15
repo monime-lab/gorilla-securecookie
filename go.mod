@@ -1,4 +1,4 @@
-module github.com/gorilla/securecookie
+module github.com/monime-lab/gorilla-securecookie
 
 go 1.20
 
