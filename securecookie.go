@@ -15,6 +15,7 @@ import (
 	"encoding/base64"
 	"encoding/gob"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -43,10 +44,10 @@ type Error interface {
 	// securecookie implementation.
 	IsInternal() bool
 
-	// Cause, if it returns a non-nil value, indicates that this error was
+	// Cause if it returns a non-nil value, indicates that this error was
 	// propagated from some underlying library.  If this method returns nil,
 	// this error was raised directly by this library.
-	//
+
 	// Cause is provided principally for debugging/logging purposes; it is
 	// rare that application logic should perform meaningfully different
 	// logic based on Cause.  See, for example, the caveats described on
@@ -266,6 +267,7 @@ func (s *SecureCookie) Encode(name string, value interface{}) (string, error) {
 	}
 	var err error
 	var b []byte
+	name = s.sanitizeName(name)
 	// 1. Serialize.
 	if b, err = s.sz.Serialize(value); err != nil {
 		return "", cookieError{cause: err, typ: usageError}
@@ -308,6 +310,7 @@ func (s *SecureCookie) Decode(name, value string, dst interface{}) error {
 		s.err = errHashKeyNotSet
 		return s.err
 	}
+	name = s.sanitizeName(name)
 	// 1. Check length.
 	if s.maxLength != 0 && len(value) > s.maxLength {
 		return fmt.Errorf("%s: %d", errValueToDecodeTooLong, len(value))
@@ -366,6 +369,12 @@ func (s *SecureCookie) timestamp() int64 {
 		return time.Now().UTC().Unix()
 	}
 	return s.timeFunc()
+}
+
+func (s *SecureCookie) sanitizeName(name string) string {
+	name = strings.TrimPrefix(name, "__Secure-")
+	name = strings.TrimPrefix(name, "__Host-")
+	return name
 }
 
 // Authentication -------------------------------------------------------------
@@ -567,15 +576,15 @@ func EncodeMulti(name string, value interface{}, codecs ...Codec) (string, error
 		return "", errNoCodecs
 	}
 
-	var errors MultiError
+	var errs []error
 	for _, codec := range codecs {
 		encoded, err := codec.Encode(name, value)
 		if err == nil {
 			return encoded, nil
 		}
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
-	return "", errors
+	return "", errors.Join(errs...)
 }
 
 // DecodeMulti decodes a cookie value using a group of codecs.
@@ -589,61 +598,13 @@ func DecodeMulti(name string, value string, dst interface{}, codecs ...Codec) er
 		return errNoCodecs
 	}
 
-	var errors MultiError
+	var errs []error
 	for _, codec := range codecs {
 		err := codec.Decode(name, value, dst)
 		if err == nil {
 			return nil
 		}
-		errors = append(errors, err)
+		errs = append(errs, err)
 	}
-	return errors
-}
-
-// MultiError groups multiple errors.
-type MultiError []error
-
-func (m MultiError) IsUsage() bool    { return m.any(func(e Error) bool { return e.IsUsage() }) }
-func (m MultiError) IsDecode() bool   { return m.any(func(e Error) bool { return e.IsDecode() }) }
-func (m MultiError) IsInternal() bool { return m.any(func(e Error) bool { return e.IsInternal() }) }
-
-// Cause returns nil for MultiError; there is no unique underlying cause in the
-// general case.
-//
-// Note: we could conceivably return a non-nil Cause only when there is exactly
-// one child error with a Cause.  However, it would be brittle for client code
-// to rely on the arity of causes inside a MultiError, so we have opted not to
-// provide this functionality.  Clients which really wish to access the Causes
-// of the underlying errors are free to iterate through the errors themselves.
-func (m MultiError) Cause() error { return nil }
-
-func (m MultiError) Error() string {
-	s, n := "", 0
-	for _, e := range m {
-		if e != nil {
-			if n == 0 {
-				s = e.Error()
-			}
-			n++
-		}
-	}
-	switch n {
-	case 0:
-		return "(0 errors)"
-	case 1:
-		return s
-	case 2:
-		return s + " (and 1 other error)"
-	}
-	return fmt.Sprintf("%s (and %d other errors)", s, n-1)
-}
-
-// any returns true if any element of m is an Error for which pred returns true.
-func (m MultiError) any(pred func(Error) bool) bool {
-	for _, e := range m {
-		if ourErr, ok := e.(Error); ok && pred(ourErr) {
-			return true
-		}
-	}
-	return false
+	return errors.Join(errs...)
 }

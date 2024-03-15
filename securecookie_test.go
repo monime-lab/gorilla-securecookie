@@ -11,7 +11,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 
 	fuzz "github.com/google/gofuzz"
@@ -19,7 +18,6 @@ import (
 
 // Asserts that cookieError and MultiError are Error implementations.
 var _ Error = cookieError{}
-var _ Error = MultiError{}
 
 var testCookies = []interface{}{
 	map[string]string{"foo": "bar"},
@@ -40,13 +38,13 @@ func TestSecureCookie(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		// Running this multiple times to check if any special character
 		// breaks encoding/decoding.
-		encoded, err1 := s1.Encode("sid", value)
+		encoded, err1 := s1.Encode("__Secure-sid", value)
 		if err1 != nil {
 			t.Error(err1)
 			continue
 		}
 		dst := make(map[string]interface{})
-		err2 := s1.Decode("sid", encoded, &dst)
+		err2 := s1.Decode("__Host-sid", encoded, &dst)
 		if err2 != nil {
 			t.Fatalf("%v: %v", err2, encoded)
 		}
@@ -230,28 +228,6 @@ func TestEncoding(t *testing.T) {
 			t.Error(err)
 		} else if string(decoded) != value {
 			t.Errorf("Expected %v, got %s.", value, string(decoded))
-		}
-	}
-}
-
-func TestMultiError(t *testing.T) {
-	s1, s2 := New(nil, nil), New(nil, nil)
-	_, err := EncodeMulti("sid", "value", s1, s2)
-	if len(err.(MultiError)) != 2 {
-		t.Errorf("Expected 2 errors, got %s.", err)
-	} else {
-		if !strings.Contains(err.Error(), "hash key is not set") {
-			t.Errorf("Expected missing hash key error, got %s.", err.Error())
-		}
-		ourErr, ok := err.(Error)
-		if !ok || !ourErr.IsUsage() {
-			t.Fatalf("Expected error to be a usage error; got %#v", err)
-		}
-		if ourErr.IsDecode() {
-			t.Errorf("Expected error NOT to be a decode error; got %#v", ourErr)
-		}
-		if ourErr.IsInternal() {
-			t.Errorf("Expected error NOT to be an internal error; got %#v", ourErr)
 		}
 	}
 }
