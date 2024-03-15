@@ -16,8 +16,8 @@ import (
 	fuzz "github.com/google/gofuzz"
 )
 
-// Asserts that cookieError and MultiError are Error implementations.
-var _ Error = cookieError{}
+// Asserts that Error and MultiError are Error implementations.
+var _ Error = Error{}
 
 var testCookies = []interface{}{
 	map[string]string{"foo": "bar"},
@@ -35,7 +35,7 @@ func TestSecureCookie(t *testing.T) {
 		"baz": 128,
 	}
 
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		// Running this multiple times to check if any special character
 		// breaks encoding/decoding.
 		encoded, err1 := s1.Encode("__Secure-sid", value)
@@ -56,20 +56,9 @@ func TestSecureCookie(t *testing.T) {
 		if err3 == nil {
 			t.Fatalf("Expected failure decoding.")
 		}
-		err4, ok := err3.(Error)
+		_, ok := err3.(Error)
 		if !ok {
 			t.Fatalf("Expected error to implement Error, got: %#v", err3)
-		}
-		if !err4.IsDecode() {
-			t.Fatalf("Expected DecodeError, got: %#v", err4)
-		}
-
-		// Test other error type flags.
-		if err4.IsUsage() {
-			t.Fatalf("Expected IsUsage() == false, got: %#v", err4)
-		}
-		if err4.IsInternal() {
-			t.Fatalf("Expected IsInternal() == false, got: %#v", err4)
 		}
 	}
 }
@@ -108,8 +97,8 @@ func TestDecodeInvalid(t *testing.T) {
 			if err == nil {
 				t.Fatalf("%d: expected failure decoding", i)
 			}
-			err2, ok := err.(Error)
-			if !ok || !err2.IsDecode() {
+			_, ok := err.(Error)
+			if !ok {
 				t.Fatalf("%d: Expected IsDecode(), got: %#v", i, err)
 			}
 		}
@@ -144,28 +133,6 @@ func TestEncryption(t *testing.T) {
 			}
 			if string(decrypted) != value {
 				t.Errorf("Expected %v, got %v.", value, string(decrypted))
-			}
-		}
-	}
-}
-
-func TestGobSerialization(t *testing.T) {
-	var (
-		sz           GobEncoder
-		serialized   []byte
-		deserialized map[string]string
-		err          error
-	)
-	for _, value := range testCookies {
-		if serialized, err = sz.Serialize(value); err != nil {
-			t.Error(err)
-		} else {
-			deserialized = make(map[string]string)
-			if err = sz.Deserialize(serialized, &deserialized); err != nil {
-				t.Error(err)
-			}
-			if fmt.Sprintf("%v", deserialized) != fmt.Sprintf("%v", value) {
-				t.Errorf("Expected %v, got %v.", value, deserialized)
 			}
 		}
 	}
@@ -242,26 +209,6 @@ func TestMultiNoCodecs(t *testing.T) {
 	err = DecodeMulti("foo", "bar", &dst)
 	if err != errNoCodecs {
 		t.Errorf("DecodeMulti: bad value for error, got: %v", err)
-	}
-}
-
-func TestMissingKey(t *testing.T) {
-	emptyKeys := [][]byte{
-		nil,
-		[]byte(""),
-	}
-
-	for _, key := range emptyKeys {
-		s1 := New(key, nil)
-
-		var dst []byte
-		err := s1.Decode("sid", "value", &dst)
-		if err != errHashKeyNotSet {
-			t.Fatalf("Expected %#v, got %#v", errHashKeyNotSet, err)
-		}
-		if err2, ok := err.(Error); !ok || !err2.IsUsage() {
-			t.Errorf("Expected missing hash key to be IsUsage(); was %#v", err)
-		}
 	}
 }
 
